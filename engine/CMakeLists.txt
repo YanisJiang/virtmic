@@ -2,6 +2,8 @@ add_library(virtmic_engine
   src/engine_policy.cpp
   src/shm_writer.cpp
   src/wasapi_capture.cpp
+  src/engine.cpp
+  src/control_server.cpp
 )
 target_include_directories(virtmic_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(virtmic_engine PUBLIC virtmic_shared)
@@ -10,12 +12,22 @@ if(WIN32)
   target_link_libraries(virtmic_engine PUBLIC kernel32 ole32 uuid)
 endif()
 
+add_executable(virtmic-engine src/main_cli.cpp)
+target_link_libraries(virtmic-engine PRIVATE virtmic_engine)
+
+add_executable(virtmic_ctl ${CMAKE_SOURCE_DIR}/tools/virtmic_ctl.cpp)
+target_link_libraries(virtmic_ctl PRIVATE virtmic_shared)
+if(WIN32)
+  target_link_libraries(virtmic_ctl PRIVATE kernel32)
+endif()
+
 if(VIRTMIC_BUILD_TESTS)
   add_executable(engine_tests
     tests/test_engine_policy.cpp
     tests/test_shm_writer.cpp
     tests/test_wasapi_capture_smoke.cpp
     tests/test_resample_window.cpp
+    tests/test_engine_loop.cpp
   )
   target_link_libraries(engine_tests PRIVATE virtmic_engine GTest::gtest_main)
   include(GoogleTest)

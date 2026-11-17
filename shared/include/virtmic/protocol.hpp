@@ -14,6 +14,7 @@ enum class Command : uint32_t {
   Stop = 2,
   SetBypass = 3,
   SimulateInferTimeout = 4,
+  Retry = 5,
 };
 
 enum class EventType : uint32_t {
@@ -111,7 +112,7 @@ inline std::optional<DecodedCommand> decode_command(
     }
     decoded.bypass.enabled = enabled;
   } else if (hdr.nbytes != 0) {
-    // Start / Stop / SimulateInferTimeout expect no payload.
+    // Start / Stop / SimulateInferTimeout / Retry expect no payload.
     return std::nullopt;
   }
 
