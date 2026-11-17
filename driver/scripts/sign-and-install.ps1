@@ -6,9 +6,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $kitBin = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
+$kitBinX86 = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x86"
 $signtool = Join-Path $kitBin "signtool.exe"
 $makecert = Join-Path $kitBin "MakeCert.exe"
 $certmgr = Join-Path $kitBin "certmgr.exe"
+$inf2cat = Join-Path $kitBinX86 "Inf2Cat.exe"
 
 function Assert-Admin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -74,8 +76,23 @@ if (-not (Test-Path $cer)) {
   & $certmgr /add $cer /s /r localMachine trustedpublisher
 }
 
+# Sign .sys first so Inf2Cat hashes the Authenticode-signed binary.
 & $signtool sign /fd SHA256 /s PrivateCertStore /n "VirtMic Test" $sys.FullName
-if ($LASTEXITCODE -ne 0) { throw "signtool failed" }
+if ($LASTEXITCODE -ne 0) { throw "signtool sign .sys failed" }
+
+# Regenerate .cat after signing .sys (catalog must cover the signed image), then sign .cat.
+# Without a signed .cat, pnputil install fails on testsigning hosts unless a kernel debugger is attached.
+$pkgDir = $inf.Directory.FullName
+if (-not (Test-Path $inf2cat)) { throw "Inf2Cat.exe not found at $inf2cat" }
+Write-Host "Regenerating catalog with Inf2Cat in $pkgDir ..."
+& $inf2cat /driver:$pkgDir /os:10_X64,10_NI_X64,10_GE_X64 /verbose
+if ($LASTEXITCODE -ne 0) { throw "Inf2Cat failed" }
+
+$cat = Get-ChildItem $pkgDir -Filter "*.cat" | Select-Object -First 1
+if (-not $cat) { throw "No .cat produced under $pkgDir after Inf2Cat" }
+Write-Host "Using CAT=$($cat.FullName)"
+& $signtool sign /fd SHA256 /s PrivateCertStore /n "VirtMic Test" $cat.FullName
+if ($LASTEXITCODE -ne 0) { throw "signtool sign .cat failed" }
 
 # Root-enumerated virtual device install
 Write-Host "Installing driver package..."

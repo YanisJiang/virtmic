@@ -65,20 +65,27 @@ powershell -ExecutionPolicy Bypass -File driver\scripts\sign-and-install.ps1 `
   -PackageDir "D:\Workspace\AI\virtmic\driver\simpleaudiosample\x64\Release\package"
 ```
 
-手动等价步骤：
+手动等价步骤（须同时签名 **.sys** 与 **.cat**；无内核调试器时缺任一则安装/加载会失败）：
 
 ```powershell
-# 自签证书（一次性）
 $kit = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64"
+$kit86 = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x86"
+$pkg = "D:\Workspace\AI\virtmic\driver\simpleaudiosample\x64\Release\package"
+
+# 自签证书（一次性）
 & "$kit\MakeCert.exe" -r -pe -ss PrivateCertStore -n "CN=VirtMic Test" -eku 1.3.6.1.5.5.7.3.3 VirtMicTest.cer
 & "$kit\certmgr.exe" /add VirtMicTest.cer /s /r localMachine root
 & "$kit\certmgr.exe" /add VirtMicTest.cer /s /r localMachine trustedpublisher
-& "$kit\signtool.exe" sign /fd SHA256 /s PrivateCertStore /n "VirtMic Test" SimpleAudioSample.sys
 
-pnputil /add-driver SimpleAudioSample.inf /install
+# 1) 先签 .sys  2) Inf2Cat 按已签名二进制重生 .cat  3) 再签 .cat
+& "$kit\signtool.exe" sign /fd SHA256 /s PrivateCertStore /n "VirtMic Test" "$pkg\SimpleAudioSample.sys"
+& "$kit86\Inf2Cat.exe" /driver:$pkg /os:10_X64,10_NI_X64,10_GE_X64 /verbose
+& "$kit\signtool.exe" sign /fd SHA256 /s PrivateCertStore /n "VirtMic Test" "$pkg\simpleaudiosample.cat"
+
+pnputil /add-driver "$pkg\SimpleAudioSample.inf" /install
 
 # ROOT 枚举设备（需 WDK Tools 中的 devcon）
-devcon install SimpleAudioSample.inf ROOT\VirtMic
+devcon install "$pkg\SimpleAudioSample.inf" ROOT\VirtMic
 # 若无 devcon：设备管理器 -> 操作 -> 添加过时硬件 -> 从磁盘安装上述 INF，硬件 ID = ROOT\VirtMic
 ```
 
@@ -135,7 +142,7 @@ devcon remove ROOT\VirtMic
 |------|------|
 | `driver/simpleaudiosample/x64/Release/package/SimpleAudioSample.sys` | 驱动二进制 |
 | `driver/simpleaudiosample/x64/Release/package/SimpleAudioSample.inf` | 安装 INF |
-| `driver/simpleaudiosample/x64/Release/package/simpleaudiosample.cat` | 目录文件（需再签名） |
+| `driver/simpleaudiosample/x64/Release/package/simpleaudiosample.cat` | 目录文件（由 Inf2Cat 生成；安装前与 .sys 一并签名） |
 | `build/engine/Debug/virtmic-feeder.exe` | feeder |
 
 ### 第三方归属

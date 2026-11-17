@@ -45,6 +45,18 @@
 
 详见 `driver/README.md`。
 
-## Commit
+## Commits
 
-`feat: VirtMic 虚拟麦克风驱动（测试签名通路）`
+1. `6601e5a` — `feat: VirtMic 虚拟麦克风驱动（测试签名通路）`
+2. `a13be98` — `chore: drop accidental WDK samples zip from driver tree`
+
+## Review follow-up (Important finding)
+
+**Issue:** testsigning installs require both `.sys` and `.cat` signed; script/README previously only signed `.sys`.
+
+**Fix (docs/scripts only; no admin install in this session):**
+
+- `driver/scripts/sign-and-install.ps1`: after signing `.sys`, run Inf2Cat to regenerate `.cat`, then `signtool sign` the `.cat`
+- `driver/README.md`: manual steps aligned (MakeCert → sign sys → Inf2Cat → sign cat → pnputil/devcon)
+
+Order matters: Inf2Cat must hash the Authenticode-signed `.sys`.
