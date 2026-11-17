@@ -1,6 +1,9 @@
 build/
 out/
 .vs/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 *.user
 *.sdf
 *.opendb
