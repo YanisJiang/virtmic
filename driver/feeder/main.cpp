@@ -1,5 +1,7 @@
 // VirtMic feeder: read Local\VirtMicPcmV1 and push frames to the driver via IOCTL.
-// Sets flags.underrun on SHM when no new engine frame is available.
+// Chase SHM write_index in order. Do NOT push silence when the engine has no
+// new frame — the driver ring already outputs silence on underrun. Injecting
+// silence here caused crackle / chop / metallic artifacts.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -8,7 +10,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -26,6 +27,12 @@ BOOL WINAPI ConsoleHandler(DWORD type) {
     return TRUE;
   }
   return FALSE;
+}
+
+uint32_t AcquireWriteIndex(const virtmic::shm::ShmHeader* hdr) {
+  // Pair with ShmWriter's MemoryBarrier before InterlockedIncrement(write_index).
+  MemoryBarrier();
+  return *reinterpret_cast<const volatile uint32_t*>(&hdr->write_index);
 }
 
 }  // namespace
@@ -62,43 +69,64 @@ int wmain() {
   auto* hdr = static_cast<virtmic::shm::ShmHeader*>(view);
   float* frames = reinterpret_cast<float*>(static_cast<char*>(view) + sizeof(virtmic::shm::ShmHeader));
 
-  uint32_t lastIndex = hdr->write_index;
-  float silence[virtmic::pcm::kSamplesPerFrame] = {};
+  // Start at the live edge so we do not replay a full ring of stale PCM.
+  uint32_t next_seq = AcquireWriteIndex(hdr);
   const DWORD need = static_cast<DWORD>(virtmic::pcm::kBytesPerFrame);
   unsigned ioctl_fail_logs = 0;
   constexpr unsigned kMaxIoctlFailLogs = 16;
+  // Cap catch-up per wake so a stalled feeder does not flood IOCTL forever.
+  constexpr uint32_t kMaxCatchUpFrames = 8;
 
-  std::wcout << L"VirtMic feeder running (SHM -> IOCTL). Ctrl+C to stop.\n";
+  std::wcout << L"VirtMic feeder running (SHM -> IOCTL, chase frames, no idle silence). "
+                L"Ctrl+C to stop.\n";
 
   while (g_run.load()) {
-    if (hdr->magic != virtmic::shm::kMagic || hdr->version != virtmic::shm::kVersion) {
+    if (hdr->magic != virtmic::shm::kMagic || hdr->version != virtmic::shm::kVersion ||
+        hdr->frames_capacity == 0) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
 
-    const uint32_t wi = hdr->write_index;
-    const float* src = silence;
+    const uint32_t capacity = hdr->frames_capacity;
+    const uint32_t wi = AcquireWriteIndex(hdr);
 
-    if (wi != lastIndex && hdr->frames_capacity > 0) {
-      const uint32_t slot = (wi - 1) % hdr->frames_capacity;
-      src = frames + static_cast<size_t>(slot) * virtmic::pcm::kSamplesPerFrame;
-      lastIndex = wi;
+    if (wi == next_seq) {
+      // No new engine frames: wait. Do not push silence.
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      continue;
+    }
+
+    // If we fell behind by more than one ring, skip overwritten slots.
+    const uint32_t lag = wi - next_seq;
+    if (lag > capacity) {
+      next_seq = wi - capacity;
+    }
+
+    uint32_t pushed = 0;
+    while (next_seq != wi && pushed < kMaxCatchUpFrames && g_run.load()) {
+      const uint32_t slot = next_seq % capacity;
+      float* src = frames + static_cast<size_t>(slot) * virtmic::pcm::kSamplesPerFrame;
+
+      DWORD bytes = 0;
+      const BOOL ok =
+          DeviceIoControl(device, IOCTL_VIRTMIC_PUSH_FRAME, src, need, nullptr, 0, &bytes,
+                          nullptr);
+      if (!ok) {
+        if (ioctl_fail_logs < kMaxIoctlFailLogs) {
+          ++ioctl_fail_logs;
+          std::wcerr << L"DeviceIoControl IOCTL_VIRTMIC_PUSH_FRAME failed ("
+                     << GetLastError() << L") [" << ioctl_fail_logs << L"/"
+                     << kMaxIoctlFailLogs << L"]\n";
+        }
+        // Back off briefly; retry same sequence next loop.
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        break;
+      }
+
+      ++next_seq;
+      ++pushed;
       hdr->flags &= ~virtmic::shm::kFlagUnderrun;
-    } else {
-      hdr->flags |= virtmic::shm::kFlagUnderrun;
     }
-
-    DWORD bytes = 0;
-    const BOOL ok =
-        DeviceIoControl(device, IOCTL_VIRTMIC_PUSH_FRAME, const_cast<float*>(src), need,
-                        nullptr, 0, &bytes, nullptr);
-    if (!ok && ioctl_fail_logs < kMaxIoctlFailLogs) {
-      ++ioctl_fail_logs;
-      std::wcerr << L"DeviceIoControl IOCTL_VIRTMIC_PUSH_FRAME failed (" << GetLastError()
-                 << L") [" << ioctl_fail_logs << L"/" << kMaxIoctlFailLogs << L"]\n";
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(virtmic::pcm::kFrameMs));
   }
 
   CloseHandle(device);
