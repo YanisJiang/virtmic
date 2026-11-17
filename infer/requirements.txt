@@ -1,0 +1,3 @@
+# Python 3.10+; fake pitch uses stdlib only (no pip deps required).
+# Optional: pytest for infer/tests
+# pytest>=7
