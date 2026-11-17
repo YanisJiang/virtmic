@@ -1,7 +1,7 @@
 # virtmic Design Spec
 
 **Date:** 2026-11-17  
-**Status:** Draft for implementation planning  
+**Status:** Ready for user review before implementation planning  
 **Location:** `D:\Workspace\AI\virtmic` (under the AI tools portal `D:\Workspace\AI`)
 
 ## Goal
@@ -44,7 +44,7 @@ Four units with clear process boundaries:
 ### Repository layout (target)
 
 - `driver/` — Virtual microphone driver (C++ / WDK)
-- `engine/` — Low-latency audio engine (C++ or Rust)
+- `engine/` — Low-latency audio engine (prefer C++ for shared types/tooling with the WDK driver; Rust only if it clearly wins for the WASAPI path)
 - `infer/` — RVC inference service (Python and/or ONNX Runtime + CUDA)
 - `app/` — Tauri tray + advanced settings
 - `shared/` — PCM format, frame duration, IPC commands/events, error codes
@@ -77,7 +77,13 @@ Tray shows estimated latency. Continuous overload is handled by the timeout poli
 
 ### Shared PCM contract
 
-Endianness, sample format (`float32` or `int16`), sample rate, channels, and frame duration are fixed in `shared/` so engine, infer, and driver never renegotiate ad hoc.
+Fixed in `shared/` (no ad hoc renegotiation):
+
+- Sample rate: 48 kHz
+- Channels: mono for the conversion path (engine may downmix mic input)
+- Inter-process PCM: little-endian `float32`
+- Driver edge: convert to the format Windows / the driver stack requires (typically 16-bit or float as declared by the device)
+- Frame duration: chosen in implementation within 10–20 ms; one constant shared by engine and infer
 
 ## Module interfaces
 
