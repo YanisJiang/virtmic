@@ -1,4 +1,4 @@
-﻿# One-shot launcher: virtmic-engine + ctl start + virtmic-feeder
+﻿# One-shot launcher: virtmic-engine + Python infer + ctl start + virtmic-feeder
 # Usage (from repo root or any cwd):
 #   powershell -ExecutionPolicy Bypass -File scripts\start-virtmic.ps1
 
@@ -37,6 +37,23 @@ if ($engineProc.HasExited) {
   exit 1
 }
 
+# Infer SHM is created when the engine process starts; attach worker before Start.
+$InferDir = Join-Path $Root "infer"
+$Py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $Py) {
+  Write-Host "警告: 未找到 python。变声推理未启动，VirtMic 将静音（可用 bypass 出原声）。" -ForegroundColor Yellow
+} else {
+  Write-Host "启动 virtmic-infer (Python) ..."
+  $prevPythonPath = $env:PYTHONPATH
+  $env:PYTHONPATH = $InferDir
+  Start-Process -FilePath $Py.Source `
+    -ArgumentList @("-m", "virtmic_infer", "--semitones", "4") `
+    -WorkingDirectory $InferDir
+  if ($null -eq $prevPythonPath) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
+  else { $env:PYTHONPATH = $prevPythonPath }
+  Start-Sleep -Milliseconds 500
+}
+
 Write-Host "等待 engine 控制管道并发送 start ..."
 $started = $false
 $deadline = (Get-Date).AddSeconds(20)
@@ -69,6 +86,8 @@ Start-Process -FilePath $Feeder -WorkingDirectory $Bin
 Write-Host ""
 Write-Host "已启动。请确认:" -ForegroundColor Green
 Write-Host "  1) engine 窗口打印 capture from `"真麦名`" (不是 VirtMic)"
-Write-Host "  2) 系统/微信默认输入可选 VirtMic"
-Write-Host "  3) 停止时关闭 engine 与 feeder 窗口即可"
+Write-Host "  2) infer 窗口打印 listening ... pitch=4"
+Write-Host "  3) 系统/微信默认输入可选 VirtMic，说话应有变调"
+Write-Host "  4) 热改半音: virtmic_ctl pitch <n> ；杀 python 应静音；bypass 1 出原声"
+Write-Host "  5) 停止时关闭 engine / infer / feeder 窗口即可"
 exit 0

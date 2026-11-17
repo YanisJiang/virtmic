@@ -20,7 +20,7 @@ Windows 虚拟麦克风：捕获真实麦克风，经本机变声管线处理后
 |------|------|
 | **引擎** (`engine/`) | 采集、时钟、环形缓冲、bypass / 超时阻断；向驱动侧 SHM 写 PCM |
 | **驱动** (`driver/`) | 将 VirtMic 暴露为系统采集设备；消费引擎 PCM |
-| **推理** (`infer/`) | RVC 模型加载与 CUDA 推理（Phase 2） |
+| **推理** (`infer/`) | Phase 2：Python 假变调（可插拔 IPC）；真 RVC/CUDA 后续替换 |
 | **控制端** (`app/`) | 托盘与高级设置（Phase 3）；Phase 1 用 CLI 代替 |
 
 共享约定见 `shared/`（48 kHz、mono float32、10 ms / 480 样本 / 帧）。设计说明：[docs/superpowers/specs/2026-11-17-virtmic-design.md](docs/superpowers/specs/2026-11-17-virtmic-design.md)。
@@ -33,9 +33,33 @@ Windows 虚拟麦克风：捕获真实麦克风，经本机变声管线处理后
 - **阻断（block）**：模拟推理超时 → 写静音并发出 `InferTimeout`，**不得泄原声**
 - **VirtMic**：WDK 虚拟捕获设备（测试签名安装）
 
-**不做：** RVC 推理、Tauri UI、正式代码签名。
+**不做（Phase 1）：** RVC 推理、Tauri UI、正式代码签名。
 
 实现计划：[docs/superpowers/plans/2026-11-17-virtmic-phase1-passthrough.md](docs/superpowers/plans/2026-11-17-virtmic-phase1-passthrough.md)。
+
+## Phase 2：可插拔推理（假变调）
+
+设计 / 计划：
+
+- [docs/superpowers/specs/2026-11-17-virtmic-phase2-infer-design.md](docs/superpowers/specs/2026-11-17-virtmic-phase2-infer-design.md)
+- [docs/superpowers/plans/2026-11-17-virtmic-phase2-infer.md](docs/superpowers/plans/2026-11-17-virtmic-phase2-infer.md)
+
+要点：
+
+- 双 SHM：`Local\VirtMicInferInV1` / `Local\VirtMicInferOutV1`
+- Python：`infer/` → `python -m virtmic_infer`（需 Python 3.10+，无强制 pip 依赖）
+- 热改半音：`virtmic_ctl pitch <n>`（经 engine 转发）
+- 推理挂掉 → VirtMic **静音**（不泄原声）；`bypass 1` 仍可出原声
+
+一键脚本会按顺序拉起 engine → infer → `ctl start` → feeder。
+
+手工验收：
+
+1. 一键后 VirtMic 可听出变调  
+2. `virtmic_ctl pitch 7` 运行中变化  
+3. 杀 infer → 静音；重启 infer 后 `virtmic_ctl retry` 恢复  
+4. `virtmic_ctl bypass 1` 可出原声  
+5. `ctest --test-dir build -C Debug` 全绿
 
 ## 构建与引擎测试
 
