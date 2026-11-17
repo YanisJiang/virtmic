@@ -1,150 +1,150 @@
-# virtmic Design Spec
+# virtmic 设计说明
 
-**Date:** 2026-11-17  
-**Status:** Ready for user review before implementation planning  
-**Location:** `D:\Workspace\AI\virtmic` (under the AI tools portal `D:\Workspace\AI`)
+**日期：** 2026-11-17  
+**状态：** 待用户审阅后进入实现计划  
+**路径：** `D:\Workspace\AI\virtmic`（位于 AI 工具门户 `D:\Workspace\AI` 下）
 
-## Goal
+## 目标
 
-virtmic is a Windows virtual microphone that relays the user’s real microphone through a local RVC voice-conversion pipeline and exposes the result as a system microphone selectable by Discord, Zoom, and similar real-time call apps.
+virtmic 是一款 Windows 虚拟麦克风：捕获用户真实麦克风，经本机 RVC 变声管线处理后，作为系统麦克风暴露出来，供 Discord、Zoom 等实时通话软件选择使用。
 
-## Confirmed requirements
+## 已确认需求
 
-| Topic | Decision |
-|-------|----------|
-| Primary use | Real-time calls (Discord / Zoom); low latency is a hard requirement |
-| Voice AI | Local RVC on NVIDIA CUDA |
-| Control UI | System tray for daily use + optional advanced settings window |
-| Virtual mic | Ship / integrate our own virtual microphone driver (not “please install VB-CABLE”) |
-| Placement | Subproject folder under the AI portal; project name `virtmic` |
+| 主题 | 决策 |
+|------|------|
+| 主要场景 | 实时通话（Discord / Zoom）；低延迟为硬指标 |
+| 变声 AI | 本机 RVC，NVIDIA CUDA |
+| 控制界面 | 日常用系统托盘 + 可选高级设置窗口 |
+| 虚拟麦 | 自带 / 集成虚拟麦克风驱动（不以「请先装 VB-CABLE」为主路径） |
+| 项目位置 | AI 门户下的子项目目录；项目名 `virtmic` |
 
-## Architecture (Approach 2: split stack)
+## 架构（方案 2：拆分栈）
 
-Four units with clear process boundaries:
+四个单元，进程边界清晰：
 
 ```
-[Real microphone]
-      │ WASAPI capture
+[真实麦克风]
+      │ WASAPI 采集
       ▼
-[Audio engine]  ←──IPC──→  [RVC infer process (CUDA)]
-      │ converted PCM
+[音频引擎]  ←──IPC──→  [RVC 推理进程 (CUDA)]
+      │ 变声后 PCM
       ▼
-[VirtMic virtual mic driver] ──→ Discord / Zoom / other apps
+[VirtMic 虚拟麦克风驱动] ──→ Discord / Zoom / 其它 App
       ▲
-[Tauri control app: tray + advanced window] ──IPC──→ engine / infer / driver status
+[Tauri 控制端：托盘 + 高级窗口] ──IPC──→ 引擎 / 推理 / 驱动状态
 ```
 
-### Responsibilities
+### 职责
 
-- **Driver** — Expose “VirtMic” as a capture device; consume PCM from the engine; no AI, no UI.
-- **Engine** — Capture, clocking, ring buffers, bypass vs block policy, feed frames to infer and write results to the driver.
-- **Infer** — Load / unload / hot-switch RVC models; CUDA inference; health signals. Must not write to the driver directly.
-- **Control app** — Tray: on/off, voice model, input device, latency/status, manual bypass. Advanced window: model paths, buffer/frame size, levels, logs, driver status.
+- **驱动** — 将「VirtMic」暴露为系统采集设备；消费引擎送来的 PCM；不做 AI、不做 UI。
+- **引擎** — 采集、时钟、环形缓冲、bypass / 阻断策略；向推理送帧并把结果写入驱动。
+- **推理** — 加载 / 卸载 / 热切换 RVC 模型；CUDA 推理；健康信号。不得直接写驱动。
+- **控制端** — 托盘：开/关、音色、输入设备、延迟/状态、手动 bypass。高级窗：模型路径、缓冲/帧长、电平、日志、驱动状态。
 
-### Repository layout (target)
+### 仓库布局（目标）
 
-- `driver/` — Virtual microphone driver (C++ / WDK)
-- `engine/` — Low-latency audio engine (prefer C++ for shared types/tooling with the WDK driver; Rust only if it clearly wins for the WASAPI path)
-- `infer/` — RVC inference service (Python and/or ONNX Runtime + CUDA)
-- `app/` — Tauri tray + advanced settings
-- `shared/` — PCM format, frame duration, IPC commands/events, error codes
-- `docs/` — Specs and plans
+- `driver/` — 虚拟麦克风驱动（C++ / WDK）
+- `engine/` — 低延迟音频引擎（优先 C++，便于与 WDK 驱动共用类型与工具链；仅当 WASAPI 路径明显更优时再考虑 Rust）
+- `infer/` — RVC 推理服务（Python 和/或 ONNX Runtime + CUDA）
+- `app/` — Tauri 托盘 + 高级设置
+- `shared/` — PCM 格式、帧时长、IPC 命令/事件、错误码
+- `docs/` — 设计说明与实现计划
 
-## Data flow and latency budget
+## 数据流与延迟预算
 
-### Happy path (voice conversion on)
+### 主路径（开启变声）
 
-1. Engine captures PCM from the real mic via WASAPI (prefer 48 kHz to match call apps).
-2. Frames enter a ring buffer; when a window is ready (about 10–20 ms), send to infer.
-3. Infer returns converted PCM for that window (or agreed hop size).
-4. Engine aligns/resamples lightly if needed and writes into the driver’s shared buffer.
-5. Call apps read converted audio from “VirtMic”.
+1. 引擎经 WASAPI 从真实麦采集 PCM（优先 48 kHz，与通话软件对齐）。
+2. 帧进入环形缓冲；凑满一窗（约 10–20 ms）后送给推理。
+3. 推理返回该窗（或约定 hop）的变声 PCM。
+4. 引擎必要时做轻微对齐/重采样，写入驱动共享缓冲。
+5. 通话软件从「VirtMic」读到变声后的音频。
 
 ### Bypass
 
-Manual bypass (user-initiated from tray) is the **only** path that may write original (unconverted) audio to VirtMic.
+仅当用户在托盘**手动开启** bypass 时，才允许把原声（未变声）写入 VirtMic。这是唯一允许的原声出口。
 
-### Latency budget (v1 targets)
+### 延迟预算（第一版目标）
 
-| Stage | Target |
-|-------|--------|
-| Capture buffer | ~10–20 ms |
-| RVC inference | ~30–80 ms (model / GPU dependent) |
-| Output / driver | ~10–20 ms |
-| **End-to-end** | **Aim under 120 ms; acceptable upper bound ~200 ms** |
+| 环节 | 目标 |
+|------|------|
+| 采集缓冲 | ~10–20 ms |
+| RVC 推理 | ~30–80 ms（视模型与 GPU） |
+| 输出 / 驱动 | ~10–20 ms |
+| **端到端** | **争取低于 120 ms；可接受上限约 200 ms** |
 
-Tray shows estimated latency. Continuous overload is handled by the timeout policy below, not by silently degrading quality without notice.
+托盘显示估算延迟。持续过载由下方超时策略处理，不得在无提示的情况下悄悄降质或泄原声。
 
-### Shared PCM contract
+### 共享 PCM 约定
 
-Fixed in `shared/` (no ad hoc renegotiation):
+在 `shared/` 中固定（禁止各层临时另行协商）：
 
-- Sample rate: 48 kHz
-- Channels: mono for the conversion path (engine may downmix mic input)
-- Inter-process PCM: little-endian `float32`
-- Driver edge: convert to the format Windows / the driver stack requires (typically 16-bit or float as declared by the device)
-- Frame duration: chosen in implementation within 10–20 ms; one constant shared by engine and infer
+- 采样率：48 kHz
+- 声道：变声路径为单声道（引擎可对麦输入做 downmix）
+- 进程间 PCM：小端 `float32`
+- 驱动边界：按 Windows / 驱动栈要求转换（设备声明的 16-bit 或 float 等）
+- 帧时长：实现阶段在 10–20 ms 内选定一个常量，引擎与推理共用
 
-## Module interfaces
+## 模块接口
 
 ### `driver/`
 
-- **In:** PCM from shared memory or named pipe; start/stop of the render/capture path as required by the audio stack.
-- **Out:** System microphone device “VirtMic”; underrun / ready status.
-- **Non-goals:** Capture from real hardware, UI, model loading.
+- **输入：** 来自共享内存或命名管道的 PCM；按音频栈需要启停采集/渲染路径。
+- **输出：** 系统麦克风设备「VirtMic」；欠载 / 就绪状态。
+- **非目标：** 真实硬件采集、UI、模型加载。
 
 ### `engine/`
 
-- **In:** Real mic PCM; control commands (start/stop, input device, bypass on/off, timeout threshold); infer PCM responses / health.
-- **Out:** PCM to driver; events to control app (`InferTimeout`, latency stats, device errors).
-- **Timeout policy:** On infer timeout or non-response → **block**: write silence (or stop writing audible audio) to VirtMic; emit `InferTimeout`. Do **not** auto-fallback to original voice.
-- **Non-goals:** Model file management UI, rich settings chrome.
+- **输入：** 真实麦 PCM；控制命令（启停、输入设备、bypass 开/关、超时阈值）；推理 PCM 响应 / 健康状态。
+- **输出：** 写入驱动的 PCM；发给控制端的事件（`InferTimeout`、延迟统计、设备错误）。
+- **超时策略：** 推理超时或无响应 → **阻断**：向 VirtMic 写静音（或不写可听音频）；发出 `InferTimeout`。**不得**自动回退为原声。
+- **非目标：** 模型文件管理 UI、复杂设置界面。
 
 ### `infer/`
 
-- **In:** PCM windows; load/unload/switch model commands.
-- **Out:** Converted PCM windows; model info; health check.
-- **Failure mode:** Crash or hang is detected by the engine as timeout/unhealthy → block + notify. Infer does not touch the driver.
+- **输入：** PCM 窗；加载 / 卸载 / 切换模型命令。
+- **输出：** 变声 PCM 窗；模型信息；健康检查。
+- **失败模式：** 崩溃或挂起由引擎判定为超时/不健康 → 阻断 + 通知。推理进程不接触驱动。
 
 ### `app/`
 
-- **In:** Engine/infer/driver status events.
-- **Out:** User commands; non-blocking prompts on `InferTimeout` with retry / turn-off conversion actions.
-- **Lifecycle:** Control app may start the engine; engine may start and supervise the infer process. If the engine is not running, VirtMic outputs silence.
+- **输入：** 引擎 / 推理 / 驱动状态事件。
+- **输出：** 用户命令；收到 `InferTimeout` 时给出非打断式提示，并提供重试 / 关闭变声操作。
+- **生命周期：** 控制端可拉起引擎；引擎可拉起并监控推理进程。引擎未运行时，VirtMic 输出静音。
 
-## Error handling
+## 错误处理
 
-Prefer explicit failure over silent original-voice leak or unexplained mute.
+宁可「明确失败」，也不要悄悄泄原声，或长时间无声却无提示。
 
-| Situation | Behavior |
-|-----------|----------|
-| Infer timeout / no response | Block VirtMic (silence); tray prompt; user can retry or disable conversion |
-| Infer process crash | Same as timeout; mark unhealthy; optional single auto-restart; if still failing, stay blocked and prompt |
-| Real mic busy / permission failure | Do not start the processing path; explain in UI |
-| Driver missing / unsigned load failure | Detect at startup; advanced window shows install / test-signing guidance |
-| GPU / CUDA unavailable | Refuse to enter conversion mode; prompt to check drivers/CUDA |
-| User enables Bypass | Original voice passed through to VirtMic (only allowed original-voice path) |
-| Engine exits | VirtMic stays silent; no stale buffer replay |
+| 情况 | 行为 |
+|------|------|
+| 推理超时 / 无响应 | 阻断 VirtMic（静音）；托盘提示；用户可重试或关闭变声 |
+| 推理进程崩溃 | 同超时；标记不健康；可选自动拉起一次；仍失败则保持阻断并提示 |
+| 真实麦被占用 / 权限失败 | 不启动处理链路；在 UI 说明原因 |
+| 驱动未安装 / 未签名导致加载失败 | 启动时检测；高级窗给出安装 / 测试签名指引 |
+| GPU / CUDA 不可用 | 拒绝进入变声态；提示检查驱动与 CUDA |
+| 用户开启 Bypass | 原声直通写入 VirtMic（唯一允许的原声路径） |
+| 引擎退出 | VirtMic 保持静音；不回放陈旧缓冲 |
 
-## Testing (v1)
+## 测试（第一版）
 
-- **Unit:** Ring buffer; timeout detection; bypass vs block transitions (optional short fade to avoid clicks).
-- **Integration:** Engine ↔ infer IPC round-trip latency; timeout always blocks and always emits an event.
-- **End-to-end:** VirtMic appears in Windows sound settings; Discord/Zoom can capture converted audio; disable / timeout / crash match the error table.
-- **Performance:** Tray latency estimate matches perceived delay; GPU load acceptable for calls.
+- **单元：** 环形缓冲；超时判定；bypass 与阻断切换（可选短淡入淡出避免破音）。
+- **集成：** 引擎 ↔ 推理 IPC 往返延迟；超时必须阻断且必须发出事件。
+- **端到端：** Windows 声音设置中能看到 VirtMic；Discord/Zoom 能采到变声音频；关闭 / 超时 / 崩溃行为符合上表。
+- **性能：** 托盘延迟估算与主观感受基本一致；通话场景下 GPU 占用可接受。
 
-## Out of scope (v1)
+## 第一版不做
 
-- Cloud inference
-- Multi-user / accounts
-- Mobile
-- Production EV code-signing / Store distribution (dev/test signing first)
-- Shipping a dependency on third-party virtual cables as the primary path
+- 云端推理
+- 多用户 / 账号体系
+- 移动端
+- 正式 EV 代码签名 / 应用商店分发（先开发/测试签名）
+- 以第三方虚拟线缆作为主依赖路径
 
-## Success criteria
+## 成功标准
 
-1. User installs VirtMic driver (test-signed acceptable for v1) and sees “VirtMic” as an input device.
-2. With conversion on, call apps hear RVC-converted voice with end-to-end latency typically under ~200 ms on the target NVIDIA machine.
-3. Infer timeout or crash results in blocked (silent) output plus a clear user prompt—not original-voice leakage.
-4. Tray covers daily controls; advanced window covers model/buffer/diagnostics.
-5. Manual bypass is available and is the only original-voice passthrough.
+1. 用户安装 VirtMic 驱动（第一版可用测试签名）后，能在系统中看到输入设备「VirtMic」。
+2. 开启变声后，通话软件听到的是 RVC 变声；在目标 NVIDIA 机器上端到端延迟通常低于约 200 ms。
+3. 推理超时或崩溃时：输出被阻断（静音）+ 明确提示用户——不泄原声。
+4. 托盘覆盖日常控制；高级窗覆盖模型 / 缓冲 / 诊断。
+5. 提供手动 bypass，且它是唯一的原声直通路径。
