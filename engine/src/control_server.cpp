@@ -132,6 +132,9 @@ void ControlServer::serve_client_(void* pipe_handle) {
     case Command::Retry:
       engine_.retry();
       break;
+    case Command::SetPitchSemitones:
+      engine_.set_pitch(decoded->pitch.semitones);
+      break;
     default:
       break;
   }

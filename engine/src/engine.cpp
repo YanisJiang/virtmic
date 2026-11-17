@@ -3,6 +3,7 @@
 #include <chrono>
 #include <vector>
 
+#include "virtmic/infer_control_client.hpp"
 #include "virtmic/pcm.hpp"
 
 namespace virtmic {
@@ -146,9 +147,15 @@ void Engine::retry() {
 }
 
 void Engine::set_pitch(int32_t semitones) {
-  std::lock_guard<std::mutex> lock(mu_);
-  pitch_semitones_ = clamp_pitch_semitones(semitones);
-  // Forwarding to infer control pipe lands in Task 6.
+  const int32_t clamped = clamp_pitch_semitones(semitones);
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    pitch_semitones_ = clamped;
+  }
+  if (!InferControlClient::send_pitch(clamped)) {
+    std::lock_guard<std::mutex> lock(mu_);
+    policy_.notify_infer_timeout();
+  }
 }
 
 std::optional<EventType> Engine::poll_event() {

@@ -66,6 +66,7 @@ void usage() {
                "  virtmic_ctl start\n"
                "  virtmic_ctl stop\n"
                "  virtmic_ctl bypass <0|1>\n"
+               "  virtmic_ctl pitch <semitones>\n"
                "  virtmic_ctl timeout\n"
                "  virtmic_ctl retry\n");
 }
@@ -97,6 +98,14 @@ int main(int argc, char** argv) {
     virtmic::BypassPayload p{};
     p.enabled = (std::atoi(argv[2]) != 0) ? 1u : 0u;
     bytes = virtmic::encode_command(virtmic::Command::SetBypass, p);
+  } else if (cmd == "pitch") {
+    if (argc < 3) {
+      usage();
+      return 2;
+    }
+    virtmic::PitchPayload p{};
+    p.semitones = static_cast<int32_t>(std::atoi(argv[2]));
+    bytes = virtmic::encode_command(virtmic::Command::SetPitchSemitones, p);
   } else {
     usage();
     return 2;

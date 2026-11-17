@@ -6,6 +6,7 @@ add_library(virtmic_engine
   src/control_server.cpp
   src/driver_client.cpp
   src/infer_client.cpp
+  src/infer_control_client.cpp
 )
 target_include_directories(virtmic_engine
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
