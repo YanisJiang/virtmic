@@ -6,6 +6,7 @@ if(VIRTMIC_BUILD_TESTS)
     tests/test_pcm_constants.cpp
     tests/test_ring_buffer.cpp
     tests/test_protocol.cpp
+    tests/test_infer_shm.cpp
   )
   target_link_libraries(shared_tests PRIVATE virtmic_shared GTest::gtest_main)
   include(GoogleTest)
