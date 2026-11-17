@@ -14,6 +14,7 @@
 #include <mmreg.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include <ksmedia.h>
 
 namespace virtmic {
@@ -110,6 +111,124 @@ float FrameToMono(const BYTE* data, int frame_index, int channels, int bits,
   return sum / static_cast<float>(channels);
 }
 
+std::string WideToUtf8(const std::wstring& w) {
+  if (w.empty()) return {};
+  const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0,
+                                    nullptr, nullptr);
+  if (n <= 1) return {};
+  std::string out(static_cast<size_t>(n - 1), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, out.data(), n, nullptr,
+                      nullptr);
+  return out;
+}
+
+bool GetFriendlyName(IMMDevice* device, std::wstring* name) {
+  if (!device || !name) return false;
+  IPropertyStore* props = nullptr;
+  if (FAILED(device->OpenPropertyStore(STGM_READ, &props)) || !props) {
+    return false;
+  }
+  PROPVARIANT var;
+  PropVariantInit(&var);
+  const HRESULT hr = props->GetValue(PKEY_Device_FriendlyName, &var);
+  bool ok = false;
+  if (SUCCEEDED(hr) && var.vt == VT_LPWSTR && var.pwszVal) {
+    *name = var.pwszVal;
+    ok = true;
+  }
+  PropVariantClear(&var);
+  props->Release();
+  return ok;
+}
+
+bool ContainsIgnoreCase(const std::wstring& hay, const std::wstring& needle) {
+  if (needle.empty()) return true;
+  auto lower = [](wchar_t c) {
+    return (c >= L'A' && c <= L'Z') ? static_cast<wchar_t>(c - L'A' + L'a') : c;
+  };
+  for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
+    bool match = true;
+    for (size_t j = 0; j < needle.size(); ++j) {
+      if (lower(hay[i + j]) != lower(needle[j])) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return true;
+  }
+  return false;
+}
+
+bool IsVirtMicEndpoint(IMMDevice* device) {
+  if (!device) return false;
+
+  LPWSTR id = nullptr;
+  if (SUCCEEDED(device->GetId(&id)) && id) {
+    const std::wstring wid(id);
+    CoTaskMemFree(id);
+    // Hardware ID from our INF: ROOT\VirtMic
+    if (ContainsIgnoreCase(wid, L"ROOT\\VirtMic") ||
+        ContainsIgnoreCase(wid, L"VirtMic")) {
+      return true;
+    }
+  }
+
+  std::wstring name;
+  if (GetFriendlyName(device, &name) && ContainsIgnoreCase(name, L"VirtMic")) {
+    return true;
+  }
+  return false;
+}
+
+// Prefer communications/console default when it is not VirtMic; otherwise first
+// active non-VirtMic capture endpoint. Never returns VirtMic.
+IMMDevice* PickPhysicalCaptureDevice(IMMDeviceEnumerator* enumerator,
+                                     std::string* err) {
+  auto try_role = [&](ERole role) -> IMMDevice* {
+    IMMDevice* candidate = nullptr;
+    const HRESULT hr =
+        enumerator->GetDefaultAudioEndpoint(eCapture, role, &candidate);
+    if (FAILED(hr) || !candidate) return nullptr;
+    if (IsVirtMicEndpoint(candidate)) {
+      candidate->Release();
+      return nullptr;
+    }
+    return candidate;
+  };
+
+  if (IMMDevice* d = try_role(eCommunications)) return d;
+  if (IMMDevice* d = try_role(eConsole)) return d;
+
+  IMMDeviceCollection* coll = nullptr;
+  HRESULT hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &coll);
+  if (FAILED(hr) || !coll) {
+    if (err) *err = HrMessage("EnumAudioEndpoints(eCapture) failed", hr);
+    return nullptr;
+  }
+
+  UINT count = 0;
+  coll->GetCount(&count);
+  IMMDevice* chosen = nullptr;
+  for (UINT i = 0; i < count; ++i) {
+    IMMDevice* d = nullptr;
+    if (FAILED(coll->Item(i, &d)) || !d) continue;
+    if (IsVirtMicEndpoint(d)) {
+      d->Release();
+      continue;
+    }
+    chosen = d;
+    break;
+  }
+  coll->Release();
+
+  if (!chosen && err) {
+    *err =
+        "no physical capture device found (all endpoints look like VirtMic, "
+        "or none are active)";
+  }
+  return chosen;
+}
+
 }  // namespace
 
 WasapiCapture::WasapiCapture() = default;
@@ -138,6 +257,7 @@ void WasapiCapture::release_() {
     mix_format_ = nullptr;
   }
   started_ = false;
+  device_name_.clear();
   fifo_.clear();
   src_mono_.clear();
   resample_pos_ = 0.0;
@@ -176,10 +296,13 @@ bool WasapiCapture::start(std::string* err) {
   }
   enumerator_ = enumerator;
 
-  IMMDevice* device = nullptr;
-  hr = enumerator->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
-  if (FAILED(hr) || !device) {
-    if (err) *err = HrMessage("GetDefaultAudioEndpoint(eCapture) failed", hr);
+  std::string pick_err;
+  IMMDevice* device = PickPhysicalCaptureDevice(enumerator, &pick_err);
+  if (!device) {
+    if (err) {
+      *err = pick_err.empty() ? "failed to pick physical capture device"
+                              : pick_err;
+    }
     release_();
     if (com_inited_) {
       CoUninitialize();
@@ -188,6 +311,13 @@ bool WasapiCapture::start(std::string* err) {
     return false;
   }
   device_ = device;
+
+  std::wstring wname;
+  if (GetFriendlyName(device, &wname)) {
+    device_name_ = WideToUtf8(wname);
+  } else {
+    device_name_ = "(unknown capture device)";
+  }
 
   IAudioClient* client = nullptr;
   hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,

@@ -64,7 +64,9 @@ int main() {
   std::string err;
   if (wasapi.cap.start(&err)) {
     source = &wasapi;
-    std::printf("virtmic-engine: using WASAPI capture\n");
+    std::printf("virtmic-engine: capture from \"%s\" (physical mic; never VirtMic)\n",
+                wasapi.cap.device_name().c_str());
+    std::printf("virtmic-engine: apps should use input device \"VirtMic\"\n");
   } else {
     std::printf("virtmic-engine: WASAPI unavailable (%s); using SineSource\n",
                 err.c_str());

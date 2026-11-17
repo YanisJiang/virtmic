@@ -13,8 +13,12 @@ class WasapiCapture {
   WasapiCapture(const WasapiCapture&) = delete;
   WasapiCapture& operator=(const WasapiCapture&) = delete;
 
+  // Opens a physical capture device (never VirtMic). On success, device_name()
+  // is the friendly name of the mic that will be captured.
   bool start(std::string* err);
   void stop();
+
+  const std::string& device_name() const { return device_name_; }
 
   // Fills 480 samples of 48 kHz mono float. Returns false if a full frame
   // is not yet available.
@@ -25,6 +29,7 @@ class WasapiCapture {
 
   bool com_inited_ = false;
   bool started_ = false;
+  std::string device_name_;
 
   void* enumerator_ = nullptr;    // IMMDeviceEnumerator*
   void* device_ = nullptr;        // IMMDevice*

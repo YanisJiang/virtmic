@@ -62,6 +62,24 @@ ctest --test-dir build -C Debug --output-on-failure
 - 开启 testsigning 与驱动安装需要**管理员权限**，首次开启 testsigning 后通常需重启
 - 安装成功后，请在 **设置 → 系统 → 声音 → 输入**（或设备管理器）中**手动确认**是否出现「VirtMic」；本仓库自动化无法代替该人工验收
 
+## 通用用法（采集源 ≠ 虚拟麦）
+
+virtmic 把两件事拆开，才能同时服务微信（只认系统默认麦）和 Discord 等软件：
+
+| 角色 | 选谁 |
+|------|------|
+| **引擎采集** | 自动选一台**物理麦克风**（永远跳过 VirtMic） |
+| **微信 / 其它 App 的输入** | 选 **VirtMic**（微信：把系统**默认输入**设为 VirtMic） |
+
+推荐测法：
+
+1. 系统默认输入设为 **VirtMic**（方便微信等）
+2. 启动 `virtmic-engine`（日志应打印 `capture from "你的真麦名字"`）
+3. `virtmic_ctl start`，再开 `virtmic-feeder`
+4. 用微信语音 / Discord（选 VirtMic）验证有声
+
+引擎启动时会打印实际采集设备名；若误采到 VirtMic，会在枚举阶段被排除。
+
 ## 用 CLI 验证超时阻断
 
 策略：**InferTimeout → 静音**；阻断优先于 bypass，超时期间即使开了 bypass 也不写原声。
