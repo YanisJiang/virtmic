@@ -4,3 +4,11 @@ out/
 *.user
 *.sdf
 *.opendb
+
+# WDK / driver build outputs
+driver/simpleaudiosample/**/x64/
+driver/simpleaudiosample/**/ARM64/
+driver/certs/
+*.sys
+*.cat
+!driver/**/*.md

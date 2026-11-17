@@ -4,8 +4,12 @@ add_library(virtmic_engine
   src/wasapi_capture.cpp
   src/engine.cpp
   src/control_server.cpp
+  src/driver_client.cpp
 )
-target_include_directories(virtmic_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(virtmic_engine
+  PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PRIVATE ${CMAKE_SOURCE_DIR}/driver/include
+)
 target_link_libraries(virtmic_engine PUBLIC virtmic_shared)
 
 if(WIN32)
@@ -14,6 +18,15 @@ endif()
 
 add_executable(virtmic-engine src/main_cli.cpp)
 target_link_libraries(virtmic-engine PRIVATE virtmic_engine)
+
+if(WIN32)
+  add_executable(virtmic-feeder ${CMAKE_SOURCE_DIR}/driver/feeder/main.cpp)
+  target_include_directories(virtmic-feeder PRIVATE
+    ${CMAKE_SOURCE_DIR}/shared/include
+    ${CMAKE_SOURCE_DIR}/driver/include
+  )
+  target_link_libraries(virtmic-feeder PRIVATE kernel32)
+endif()
 
 add_executable(virtmic_ctl ${CMAKE_SOURCE_DIR}/tools/virtmic_ctl.cpp)
 target_link_libraries(virtmic_ctl PRIVATE virtmic_shared)
