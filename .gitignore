@@ -9,6 +9,7 @@ out/
 driver/simpleaudiosample/**/x64/
 driver/simpleaudiosample/**/ARM64/
 driver/certs/
+driver/wdk-samples.zip
 *.sys
 *.cat
 !driver/**/*.md
