@@ -104,7 +104,7 @@ inline std::optional<DecodedCommand> decode_command(
   DecodedCommand decoded{cmd, {}};
 
   if (cmd == Command::SetBypass) {
-    if (hdr.nbytes < sizeof(uint32_t)) return std::nullopt;
+    if (hdr.nbytes != sizeof(uint32_t)) return std::nullopt;
     uint32_t enabled = 0;
     if (!detail::read_u32(bytes.data(), bytes.size(), off, enabled)) {
       return std::nullopt;
@@ -128,6 +128,8 @@ inline std::optional<DecodedEvent> decode_event(
   MessageHeader hdr{};
   std::size_t off = 0;
   if (!detail::parse_header(bytes, hdr, off)) return std::nullopt;
+  // Current events carry an empty payload.
+  if (hdr.nbytes != 0) return std::nullopt;
   return DecodedEvent{static_cast<EventType>(hdr.type)};
 }
 

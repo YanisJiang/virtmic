@@ -17,3 +17,16 @@ TEST(Protocol, InferTimeoutEvent) {
   ASSERT_TRUE(ev.has_value());
   EXPECT_EQ(ev->type, virtmic::EventType::InferTimeout);
 }
+
+TEST(Protocol, OversizedSetBypassPayloadRejected) {
+  // Header claims 8-byte payload; SetBypass must be exactly 4 bytes.
+  std::vector<uint8_t> bytes;
+  virtmic::detail::append_u32(bytes, virtmic::kProtocolMagic);
+  virtmic::detail::append_u32(bytes,
+                              static_cast<uint32_t>(virtmic::Command::SetBypass));
+  virtmic::detail::append_u32(bytes, 8);
+  virtmic::detail::append_u32(bytes, 1);
+  virtmic::detail::append_u32(bytes, 0xDEADBEEF);
+  auto decoded = virtmic::decode_command(bytes);
+  EXPECT_FALSE(decoded.has_value());
+}
