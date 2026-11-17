@@ -85,7 +85,9 @@ bool ShmWriter::write_frame(const float* samples) {
                                         sizeof(shm::ShmHeader)) +
                static_cast<std::size_t>(slot) * pcm::kSamplesPerFrame;
   std::memcpy(dst, samples, pcm::kBytesPerFrame);
-  ++hdr->write_index;
+  // Publish: PCM stores must be visible to readers before write_index advances.
+  MemoryBarrier();
+  InterlockedIncrement(reinterpret_cast<volatile LONG*>(&hdr->write_index));
   return true;
 }
 
@@ -98,7 +100,9 @@ bool ShmWriter::write_silence_frame() {
                                         sizeof(shm::ShmHeader)) +
                static_cast<std::size_t>(slot) * pcm::kSamplesPerFrame;
   std::memset(dst, 0, pcm::kBytesPerFrame);
-  ++hdr->write_index;
+  // Publish: silence payload visible before write_index advances (same as write_frame).
+  MemoryBarrier();
+  InterlockedIncrement(reinterpret_cast<volatile LONG*>(&hdr->write_index));
   return true;
 }
 

@@ -16,7 +16,7 @@ inline constexpr uint32_t kFlagUnderrun = 1u << 0;
 struct ShmHeader {
   uint32_t magic;
   uint32_t version;
-  uint32_t write_index;      // monotonically increasing frame sequence
+  uint32_t write_index;      // mono seq; writer publishes with release after PCM
   uint32_t frames_capacity;  // e.g. 32
   uint32_t sample_rate;      // 48000
   uint32_t channels;         // 1

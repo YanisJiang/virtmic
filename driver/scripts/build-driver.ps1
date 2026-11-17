@@ -7,11 +7,24 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$vs = "D:\Soft\Microsoft\Visual Studio\2022\Community"
+
+$vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) {
+  throw "vswhere.exe not found: $vswhere"
+}
+
+$vs = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath
+if (-not $vs) {
+  throw "Visual Studio with MSBuild not found via vswhere"
+}
+
 $msbuild = Join-Path $vs "MSBuild\Current\Bin\amd64\MSBuild.exe"
+if (-not (Test-Path $msbuild)) {
+  $msbuild = Join-Path $vs "MSBuild\Current\Bin\MSBuild.exe"
+}
 $sln = Join-Path $PSScriptRoot "..\simpleaudiosample\SimpleAudioSample.sln"
 
-if (-not (Test-Path $msbuild)) { throw "MSBuild not found: $msbuild" }
+if (-not (Test-Path $msbuild)) { throw "MSBuild not found under: $vs" }
 if (-not (Test-Path $sln)) { throw "Solution not found: $sln" }
 
 & $msbuild $sln /m /p:Configuration=$Configuration /p:Platform=$Platform /p:SignMode=Off /p:SpectreMitigation=false

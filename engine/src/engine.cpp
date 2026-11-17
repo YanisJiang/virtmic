@@ -62,8 +62,11 @@ void Engine::process_one_() {
     writer_.write_silence_frame();
     return;
   }
+  // Passthrough with no source frame: same underrun policy as Silence (keep tick paced).
   if (got) {
     writer_.write_frame(frame.data());
+  } else {
+    writer_.write_silence_frame();
   }
 }
 

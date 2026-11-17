@@ -65,6 +65,8 @@ int wmain() {
   uint32_t lastIndex = hdr->write_index;
   float silence[virtmic::pcm::kSamplesPerFrame] = {};
   const DWORD need = static_cast<DWORD>(virtmic::pcm::kBytesPerFrame);
+  unsigned ioctl_fail_logs = 0;
+  constexpr unsigned kMaxIoctlFailLogs = 16;
 
   std::wcout << L"VirtMic feeder running (SHM -> IOCTL). Ctrl+C to stop.\n";
 
@@ -76,7 +78,6 @@ int wmain() {
 
     const uint32_t wi = hdr->write_index;
     const float* src = silence;
-    bool underrun = false;
 
     if (wi != lastIndex && hdr->frames_capacity > 0) {
       const uint32_t slot = (wi - 1) % hdr->frames_capacity;
@@ -84,15 +85,19 @@ int wmain() {
       lastIndex = wi;
       hdr->flags &= ~virtmic::shm::kFlagUnderrun;
     } else {
-      underrun = true;
       hdr->flags |= virtmic::shm::kFlagUnderrun;
     }
 
     DWORD bytes = 0;
-    DeviceIoControl(device, IOCTL_VIRTMIC_PUSH_FRAME, const_cast<float*>(src), need, nullptr, 0,
-                    &bytes, nullptr);
+    const BOOL ok =
+        DeviceIoControl(device, IOCTL_VIRTMIC_PUSH_FRAME, const_cast<float*>(src), need,
+                        nullptr, 0, &bytes, nullptr);
+    if (!ok && ioctl_fail_logs < kMaxIoctlFailLogs) {
+      ++ioctl_fail_logs;
+      std::wcerr << L"DeviceIoControl IOCTL_VIRTMIC_PUSH_FRAME failed (" << GetLastError()
+                 << L") [" << ioctl_fail_logs << L"/" << kMaxIoctlFailLogs << L"]\n";
+    }
 
-    (void)underrun;
     std::this_thread::sleep_for(std::chrono::milliseconds(virtmic::pcm::kFrameMs));
   }
 
