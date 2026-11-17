@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -111,6 +112,9 @@ int wmain() {
 
   std::wcout << L"VirtMic feeder running (queued chase + 10ms pace). Ctrl+C to stop.\n";
 
+  auto last_log = clock::now();
+  uint64_t pushed_ok = 0;
+
   while (g_run.load()) {
     if (hdr->magic != virtmic::shm::kMagic || hdr->version != virtmic::shm::kVersion ||
         hdr->frames_capacity == 0) {
@@ -173,7 +177,21 @@ int wmain() {
       hdr->flags |= virtmic::shm::kFlagUnderrun;
     }
 
-    PushIoctl(device, out.data(), need, &ioctl_fail_logs);
+    if (PushIoctl(device, out.data(), need, &ioctl_fail_logs)) {
+      ++pushed_ok;
+    }
+
+    if (clock::now() - last_log >= std::chrono::seconds(1)) {
+      float peak = 0.f;
+      for (float s : out) {
+        const float a = std::fabs(s);
+        if (a > peak) peak = a;
+      }
+      std::wcout << L"[feeder] wi=" << AcquireWriteIndex(hdr) << L" next=" << next_seq
+                 << L" q=" << queue.size() << L" peak=" << peak
+                 << L" pushed_ok=" << pushed_ok << L" hold=" << holdover_left << L"\n";
+      last_log = clock::now();
+    }
   }
 
   CloseHandle(device);

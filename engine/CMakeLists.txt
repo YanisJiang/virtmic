@@ -34,6 +34,30 @@ if(WIN32)
   target_link_libraries(virtmic_ctl PRIVATE kernel32)
 endif()
 
+add_executable(virtmic-shm-probe ${CMAKE_SOURCE_DIR}/tools/shm_probe.cpp)
+target_link_libraries(virtmic-shm-probe PRIVATE virtmic_shared)
+if(WIN32)
+  target_link_libraries(virtmic-shm-probe PRIVATE kernel32)
+endif()
+
+add_executable(virtmic-engine-energy-diag ${CMAKE_SOURCE_DIR}/tools/engine_energy_diag.cpp)
+target_link_libraries(virtmic-engine-energy-diag PRIVATE virtmic_engine)
+if(WIN32)
+  target_link_libraries(virtmic-engine-energy-diag PRIVATE kernel32)
+endif()
+
+add_executable(virtmic-wasapi-energy-diag ${CMAKE_SOURCE_DIR}/tools/wasapi_energy_diag.cpp)
+target_link_libraries(virtmic-wasapi-energy-diag PRIVATE virtmic_engine)
+if(WIN32)
+  target_link_libraries(virtmic-wasapi-energy-diag PRIVATE kernel32)
+endif()
+
+add_executable(virtmic-ctl-start-diag ${CMAKE_SOURCE_DIR}/tools/ctl_start_diag.cpp)
+target_link_libraries(virtmic-ctl-start-diag PRIVATE virtmic_engine)
+if(WIN32)
+  target_link_libraries(virtmic-ctl-start-diag PRIVATE kernel32)
+endif()
+
 if(VIRTMIC_BUILD_TESTS)
   add_executable(engine_tests
     tests/test_engine_policy.cpp

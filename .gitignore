@@ -5,6 +5,9 @@ out/
 *.sdf
 *.opendb
 
+# Agent SDD scratch (briefs / review packages)
+.superpowers/sdd/
+
 # WDK / driver build outputs
 driver/simpleaudiosample/**/x64/
 driver/simpleaudiosample/**/ARM64/
