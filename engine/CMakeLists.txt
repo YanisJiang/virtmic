@@ -67,6 +67,8 @@ if(VIRTMIC_BUILD_TESTS)
     tests/test_resample_window.cpp
     tests/test_engine_loop.cpp
     tests/test_infer_client.cpp
+    tests/test_engine_infer_path.cpp
+    tests/test_pitch_clamp.cpp
   )
   target_link_libraries(engine_tests PRIVATE virtmic_engine GTest::gtest_main)
   include(GoogleTest)

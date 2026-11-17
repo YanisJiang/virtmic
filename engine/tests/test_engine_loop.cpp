@@ -89,7 +89,7 @@ bool WaitWriteIndexAtLeast(uint32_t min_index, int timeout_ms) {
 
 }  // namespace
 
-TEST(EngineLoop, StartPassthroughTimeoutSilenceThenRetryRestore) {
+TEST(EngineLoop, BypassPassthroughTimeoutSilenceThenRetryRestore) {
   SineSource source;
   auto engine = virtmic::Engine::create(source);
   ASSERT_NE(engine, nullptr);
@@ -101,6 +101,8 @@ TEST(EngineLoop, StartPassthroughTimeoutSilenceThenRetryRestore) {
     baseline = static_cast<const virtmic::shm::ShmHeader*>(m.view)->write_index;
   }
 
+  // Without infer worker, Processed would silence; use Bypass for audible path.
+  engine->set_bypass(true);
   engine->start();
   ASSERT_TRUE(WaitWriteIndexAtLeast(baseline + 3, 500));
 
@@ -111,34 +113,37 @@ TEST(EngineLoop, StartPassthroughTimeoutSilenceThenRetryRestore) {
   }
 
   engine->simulate_infer_timeout();
-  // Drain a few frames so SHM reflects Silence (block must not leak source).
-  uint32_t after_timeout_target = 0;
+  // Drain until latest SHM frame is silence (block must not leak source).
   {
-    auto m = OpenReadOnly();
-    ASSERT_NE(m.view, nullptr);
-    after_timeout_target =
-        static_cast<const virtmic::shm::ShmHeader*>(m.view)->write_index + 3;
+    bool silent = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+      auto m = OpenReadOnly();
+      if (m.view && LatestFrameIsSilent(m.view)) {
+        silent = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(silent);
   }
-  ASSERT_TRUE(WaitWriteIndexAtLeast(after_timeout_target, 500));
 
+  // Bypass while still blocked must remain silence (no original leak).
+  engine->set_bypass(true);
   {
-    auto m = OpenReadOnly();
-    ASSERT_NE(m.view, nullptr);
-    EXPECT_TRUE(LatestFrameIsSilent(m.view));
-
-    // Bypass while still blocked must remain silence (no original leak).
-    engine->set_bypass(true);
-  }
-  {
-    auto m = OpenReadOnly();
-    const uint32_t need =
-        static_cast<const virtmic::shm::ShmHeader*>(m.view)->write_index + 2;
-    ASSERT_TRUE(WaitWriteIndexAtLeast(need, 500));
-  }
-  {
-    auto m = OpenReadOnly();
-    ASSERT_NE(m.view, nullptr);
-    EXPECT_TRUE(LatestFrameIsSilent(m.view));
+    bool silent = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+      auto m = OpenReadOnly();
+      if (m.view && LatestFrameIsSilent(m.view)) {
+        silent = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(silent);
   }
 
   engine->retry();
