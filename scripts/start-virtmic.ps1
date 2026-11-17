@@ -4,6 +4,29 @@
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-VirtmicPython {
+  # Prefer `py -3` real interpreter; never use WindowsApps store stub.
+  $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+  if ($pyLauncher) {
+    try {
+      $exe = (& py -3 -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1)
+      if ($exe) {
+        $exe = $exe.Trim()
+        if ((Test-Path -LiteralPath $exe) -and ($exe -notmatch 'WindowsApps')) {
+          return $exe
+        }
+      }
+    } catch {}
+  }
+  foreach ($name in @("python", "python3")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and ($cmd.Source -notmatch 'WindowsApps')) {
+      return $cmd.Source
+    }
+  }
+  return $null
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path (Join-Path $Root "CMakeLists.txt"))) {
   Write-Host "错误: 找不到仓库根目录（应包含 CMakeLists.txt）: $Root" -ForegroundColor Red
@@ -39,19 +62,28 @@ if ($engineProc.HasExited) {
 
 # Infer SHM is created when the engine process starts; attach worker before Start.
 $InferDir = Join-Path $Root "infer"
-$Py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $Py) {
-  Write-Host "警告: 未找到 python。变声推理未启动，VirtMic 将静音（可用 bypass 出原声）。" -ForegroundColor Yellow
+$PythonExe = Resolve-VirtmicPython
+if (-not $PythonExe) {
+  Write-Host "警告: 未找到可用的 Python（已跳过 WindowsApps 占位）。变声未启动，VirtMic 将静音（可用 bypass 出原声）。" -ForegroundColor Yellow
+  Write-Host "  提示: 安装 Python 3.10+ 后确认「py -3」可用。" -ForegroundColor Yellow
 } else {
-  Write-Host "启动 virtmic-infer (Python) ..."
+  Write-Host "启动 virtmic-infer: $PythonExe ..."
   $prevPythonPath = $env:PYTHONPATH
   $env:PYTHONPATH = $InferDir
-  Start-Process -FilePath $Py.Source `
-    -ArgumentList @("-m", "virtmic_infer", "--semitones", "4") `
-    -WorkingDirectory $InferDir
+  $inferProc = Start-Process -FilePath $PythonExe `
+    -ArgumentList @("-m", "virtmic_infer", "--semitones", "7") `
+    -WorkingDirectory $InferDir `
+    -PassThru
   if ($null -eq $prevPythonPath) { Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue }
   else { $env:PYTHONPATH = $prevPythonPath }
-  Start-Sleep -Milliseconds 500
+  Start-Sleep -Milliseconds 700
+  if ($inferProc.HasExited) {
+    Write-Host "错误: virtmic-infer 启动后立刻退出 (exit=$($inferProc.ExitCode))。请手动运行:" -ForegroundColor Red
+    Write-Host "  cd infer"
+    Write-Host "  set PYTHONPATH=."
+    Write-Host "  `"$PythonExe`" -m virtmic_infer --semitones 7"
+    exit 1
+  }
 }
 
 Write-Host "等待 engine 控制管道并发送 start ..."
@@ -86,8 +118,8 @@ Start-Process -FilePath $Feeder -WorkingDirectory $Bin
 Write-Host ""
 Write-Host "已启动。请确认:" -ForegroundColor Green
 Write-Host "  1) engine 窗口打印 capture from `"真麦名`" (不是 VirtMic)"
-Write-Host "  2) infer 窗口打印 listening ... pitch=4"
-Write-Host "  3) 系统/微信默认输入可选 VirtMic，说话应有变调"
-Write-Host "  4) 热改半音: virtmic_ctl pitch <n> ；杀 python 应静音；bypass 1 出原声"
+Write-Host "  2) infer 窗口打印 listening ... pitch=7"
+Write-Host "  3) 系统/微信默认输入可选 VirtMic，说话应明显变高"
+Write-Host "  4) 热改: virtmic_ctl pitch -7 ；杀 python 应静音；bypass 1 出原声"
 Write-Host "  5) 停止时关闭 engine / infer / feeder 窗口即可"
 exit 0

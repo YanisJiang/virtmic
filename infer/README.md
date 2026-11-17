@@ -9,13 +9,13 @@ Python 推理进程：读 `Local\VirtMicInferInV1`，假变调后写 `Local\Virt
 ```text
 cd infer
 set PYTHONPATH=.
-python -m virtmic_infer --semitones 4
+python -m virtmic_infer --semitones 7
 ```
 
 热改半音（经 engine 转发）：
 
 ```text
-virtmic_ctl pitch 7
+virtmic_ctl pitch -7
 ```
 
 ## 测试

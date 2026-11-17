@@ -9,9 +9,8 @@ import threading
 import time
 
 from virtmic_infer.control import PitchControlServer
-from virtmic_infer.pitch import shift_semitones
+from virtmic_infer.pitch import PitchShifter
 from virtmic_infer.shm import (
-    BYTES_PER_FRAME,
     IN_MAGIC,
     IN_NAME,
     OUT_MAGIC,
@@ -23,11 +22,12 @@ from virtmic_infer.shm import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="virtmic fake-pitch infer worker")
-    parser.add_argument("--semitones", type=int, default=4)
+    parser.add_argument("--semitones", type=int, default=7)
     args = parser.parse_args(argv)
 
     pitch_lock = threading.Lock()
     state = {"semitones": int(args.semitones)}
+    shifter = PitchShifter()
 
     def on_pitch(v: int) -> None:
         clamped = max(-12, min(12, int(v)))
@@ -35,7 +35,6 @@ def main(argv: list[str] | None = None) -> int:
             state["semitones"] = clamped
         print(f"virtmic-infer: pitch={clamped}", flush=True)
 
-    # Engine creates the mappings; retry open until available.
     in_ring = None
     out_ring = None
     deadline = time.time() + 30.0
@@ -70,13 +69,12 @@ def main(argv: list[str] | None = None) -> int:
             frame = array.array("f")
             frame.frombytes(pcm_bytes)
             if len(frame) != SAMPLES_PER_FRAME:
-                # pad/truncate defensively
                 frame = array.array("f", list(frame)[:SAMPLES_PER_FRAME])
                 while len(frame) < SAMPLES_PER_FRAME:
                     frame.append(0.0)
             with pitch_lock:
                 st = state["semitones"]
-            out = shift_semitones(frame, st)
+            out = shifter.process(frame, st)
             out_ring.write_frame(out.tobytes())
     except KeyboardInterrupt:
         print("virtmic-infer: stopping", flush=True)
