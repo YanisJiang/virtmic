@@ -30,19 +30,34 @@ if ($missing.Count -gt 0) {
 
 Write-Host "仓库: $Root"
 Write-Host "启动 virtmic-engine ..."
-Start-Process -FilePath $Engine -WorkingDirectory $Bin
+$engineProc = Start-Process -FilePath $Engine -WorkingDirectory $Bin -PassThru
+Start-Sleep -Milliseconds 400
+if ($engineProc.HasExited) {
+  Write-Host "错误: virtmic-engine 启动后立刻退出 (exit=$($engineProc.ExitCode))。请手动运行引擎查看报错。" -ForegroundColor Red
+  exit 1
+}
 
 Write-Host "等待 engine 控制管道并发送 start ..."
 $started = $false
-$deadline = (Get-Date).AddSeconds(15)
+$deadline = (Get-Date).AddSeconds(20)
+# Native stderr must not abort the retry loop under ErrorAction Stop.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 while ((Get-Date) -lt $deadline) {
-  & $Ctl start 2>$null
+  if ($engineProc.HasExited) {
+    Write-Host "错误: virtmic-engine 已退出 (exit=$($engineProc.ExitCode))。" -ForegroundColor Red
+    $ErrorActionPreference = $prevEap
+    exit 1
+  }
+  cmd /c "`"$Ctl`" start >nul 2>nul"
   if ($LASTEXITCODE -eq 0) {
     $started = $true
     break
   }
   Start-Sleep -Milliseconds 250
 }
+$ErrorActionPreference = $prevEap
+
 if (-not $started) {
   Write-Host "错误: virtmic_ctl start 超时。请查看 engine 窗口是否已打印 listening on pipe。" -ForegroundColor Red
   exit 1
