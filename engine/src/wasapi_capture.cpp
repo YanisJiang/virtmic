@@ -1,6 +1,7 @@
 #include "virtmic/wasapi_capture.hpp"
 
 #include "virtmic/pcm.hpp"
+#include "virtmic/resample_window.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -320,41 +321,8 @@ bool WasapiCapture::read_frame(float* mono_out) {
 
   // Linear resample src_mono_ → 48 kHz into fifo_.
   if (!src_mono_.empty()) {
-    const double ratio =
-        static_cast<double>(pcm::kSampleRate) / static_cast<double>(src_rate_);
-    // Consume source while we can produce output samples.
-    // resample_pos_ is index into infinite stream; we keep src_mono_[0] as
-    // floor(resample_pos_) relative to a sliding window by discarding used
-    // samples.
-    while (true) {
-      const double src_index = resample_pos_;
-      const std::size_t i0 = static_cast<std::size_t>(std::floor(src_index));
-      const std::size_t i1 = i0 + 1;
-      if (i1 >= src_mono_.size()) break;
-
-      const double frac = src_index - static_cast<double>(i0);
-      const float s0 = src_mono_[i0];
-      const float s1 = src_mono_[i1];
-      const float y =
-          static_cast<float>((1.0 - frac) * s0 + frac * s1);
-      fifo_.push_back(y);
-      resample_pos_ += 1.0 / ratio;
-    }
-
-    // Drop consumed source samples; keep one for interpolation continuity.
-    const std::size_t drop =
-        static_cast<std::size_t>(std::floor(resample_pos_));
-    if (drop > 0 && drop < src_mono_.size()) {
-      src_mono_.erase(src_mono_.begin(),
-                      src_mono_.begin() + static_cast<std::ptrdiff_t>(drop));
-      resample_pos_ -= static_cast<double>(drop);
-    } else if (drop >= src_mono_.size() && !src_mono_.empty()) {
-      // Keep last sample.
-      const float last = src_mono_.back();
-      src_mono_.clear();
-      src_mono_.push_back(last);
-      resample_pos_ = 0.0;
-    }
+    resample::LinearResampleToRate(src_mono_, resample_pos_, src_rate_,
+                                   pcm::kSampleRate, fifo_);
   }
 
   if (fifo_.size() < static_cast<std::size_t>(pcm::kSamplesPerFrame)) {

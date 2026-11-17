@@ -15,6 +15,7 @@ if(VIRTMIC_BUILD_TESTS)
     tests/test_engine_policy.cpp
     tests/test_shm_writer.cpp
     tests/test_wasapi_capture_smoke.cpp
+    tests/test_resample_window.cpp
   )
   target_link_libraries(engine_tests PRIVATE virtmic_engine GTest::gtest_main)
   include(GoogleTest)
