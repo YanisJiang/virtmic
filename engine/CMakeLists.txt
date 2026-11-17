@@ -5,6 +5,7 @@ add_library(virtmic_engine
   src/engine.cpp
   src/control_server.cpp
   src/driver_client.cpp
+  src/infer_client.cpp
 )
 target_include_directories(virtmic_engine
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -65,6 +66,7 @@ if(VIRTMIC_BUILD_TESTS)
     tests/test_wasapi_capture_smoke.cpp
     tests/test_resample_window.cpp
     tests/test_engine_loop.cpp
+    tests/test_infer_client.cpp
   )
   target_link_libraries(engine_tests PRIVATE virtmic_engine GTest::gtest_main)
   include(GoogleTest)
