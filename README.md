@@ -74,11 +74,17 @@ virtmic 把两件事拆开，才能同时服务微信（只认系统默认麦）
 推荐测法：
 
 1. 系统默认输入设为 **VirtMic**（方便微信等）
-2. 启动 `virtmic-engine`（日志应打印 `capture from "你的真麦名字"`）
-3. `virtmic_ctl start`，再开 `virtmic-feeder`
+2. **一键启动**（推荐）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-virtmic.ps1
+```
+
+   或手动：启动 `virtmic-engine` → `virtmic_ctl start` → `virtmic-feeder`
+3. 看 engine 日志：`capture from "你的真麦名字"`（不是 VirtMic）
 4. 用微信语音 / Discord（选 VirtMic）验证有声
 
-引擎启动时会打印实际采集设备名；若误采到 VirtMic，会在枚举阶段被排除。
+采集优先级：控制台默认真麦 → 通讯默认真麦 → 枚举第一台非 VirtMic。引擎启动时会打印实际设备名。
 
 ## 用 CLI 验证超时阻断
 

@@ -196,8 +196,10 @@ IMMDevice* PickPhysicalCaptureDevice(IMMDeviceEnumerator* enumerator,
     return candidate;
   };
 
-  if (IMMDevice* d = try_role(eCommunications)) return d;
+  // Prefer console/multimedia default (closer to "normal" mic tone); then
+  // communications. Never VirtMic (filtered in try_role / enum).
   if (IMMDevice* d = try_role(eConsole)) return d;
+  if (IMMDevice* d = try_role(eCommunications)) return d;
 
   IMMDeviceCollection* coll = nullptr;
   HRESULT hr = enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &coll);
