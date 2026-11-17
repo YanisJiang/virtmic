@@ -33,9 +33,10 @@ OutputMode EnginePolicy::decide() const {
   if (blocked_) {
     return OutputMode::Silence;
   }
-  // Phase 1: Start (bypass or not) → Passthrough placeholder for the path.
-  (void)bypass_;
-  return OutputMode::Passthrough;
+  if (bypass_) {
+    return OutputMode::Passthrough;
+  }
+  return OutputMode::Processed;
 }
 
 std::optional<EventType> EnginePolicy::poll_event() {

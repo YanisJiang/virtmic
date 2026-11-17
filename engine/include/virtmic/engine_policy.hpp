@@ -6,9 +6,9 @@
 
 namespace virtmic {
 
-enum class OutputMode { Silence, Passthrough };
+enum class OutputMode { Silence, Passthrough, Processed };
 
-// Phase 1 output policy: Start → Passthrough; InferTimeout block beats bypass.
+// Start → Processed (infer path); Bypass → Passthrough; InferTimeout block beats bypass.
 class EnginePolicy {
  public:
   void start();
