@@ -62,3 +62,26 @@ Branch: `feat/phase1-passthrough` (not pushed).
 2. **Start 前也会写 Silence 帧** — worker 在 `create` 后即跑，`decide()` 未 Start 时写零；浪费少量 SHM 带宽，行为安全。
 3. **控制管道单实例 `nMaxInstances=1`** — 停服时靠客户端连一下唤醒 `ConnectNamedPipe`；高并发控制端未做。
 4. **CLI stdout 重定向可能块缓冲** — 交互控制台正常；管道/重定向时事件日志可能延迟。
+
+## Review follow-up (Important fixes)
+
+### 1) Event ownership — ControlServer must not steal `poll_event`
+
+**Root cause:** `serve_client_` called `engine_.poll_event()` after commands and wrote the event to the pipe. `InferTimeout` is single-shot; this raced the CLI loop in `main_cli.cpp` and often left stdout without `event: InferTimeout` after `virtmic_ctl timeout`.
+
+**Fix:** Control pipe is command-only — removed `poll_event` / event reply from `ControlServer`. CLI retains sole ownership of engine events via `poll_event`.
+
+**Test:** `ControlServer.TimeoutLeavesInferTimeoutForCliPoll` — pipe `SimulateInferTimeout`, then `engine->poll_event()` still returns `InferTimeout`.
+
+### 2) Race — Silence vs `write_frame` after timeout
+
+**Root cause:** `process_one_` did `decide()` under lock, unlocked, then `write_frame`. Timeout between unlock and write could leak one source frame after block.
+
+**Fix:** Hold `mu_` across `decide()` and the subsequent `write_silence_frame()` / `write_frame()` so Silence cannot lose to a raced Passthrough write.
+
+### Verification
+
+```text
+ctest --test-dir build -C Debug -R "EngineLoop|EnginePolicy|ShmWriter|ControlServer|Protocol" --output-on-failure
+100% tests passed, 0 tests failed out of 8
+```

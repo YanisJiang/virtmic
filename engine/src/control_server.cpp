@@ -26,18 +26,6 @@ bool read_exact(HANDLE pipe, void* buf, DWORD nbytes) {
   return true;
 }
 
-bool write_all(HANDLE pipe, const void* buf, DWORD nbytes) {
-  const auto* p = static_cast<const uint8_t*>(buf);
-  DWORD sent = 0;
-  while (sent < nbytes) {
-    DWORD n = 0;
-    if (!WriteFile(pipe, p + sent, nbytes - sent, &n, nullptr)) return false;
-    if (n == 0) return false;
-    sent += n;
-  }
-  return true;
-}
-
 void wake_accept_blocker() {
   // Unblock a waiting ConnectNamedPipe by opening the pipe as a client.
   for (int i = 0; i < 20; ++i) {
@@ -147,11 +135,7 @@ void ControlServer::serve_client_(void* pipe_handle) {
     default:
       break;
   }
-
-  if (auto ev = engine_.poll_event()) {
-    auto reply = encode_event(*ev);
-    write_all(pipe, reply.data(), static_cast<DWORD>(reply.size()));
-  }
+  // Command-only reply path: do not poll_event — CLI owns engine events.
 }
 
 }  // namespace virtmic

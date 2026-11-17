@@ -52,11 +52,10 @@ void Engine::process_one_() {
                            0.f);
   const bool got = source_ && source_->read_frame(frame.data());
 
-  OutputMode mode;
-  {
-    std::lock_guard<std::mutex> lock(mu_);
-    mode = policy_.decide();
-  }
+  // Decide + write under the same lock so timeout cannot sneak in between
+  // Passthrough decide and write_frame (no one-frame original-voice leak).
+  std::lock_guard<std::mutex> lock(mu_);
+  const OutputMode mode = policy_.decide();
 
   // CRITICAL: blocked / stopped → silence only; never write source PCM.
   if (mode == OutputMode::Silence) {

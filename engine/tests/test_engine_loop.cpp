@@ -3,14 +3,17 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <thread>
 #include <vector>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include "virtmic/control_server.hpp"
 #include "virtmic/engine.hpp"
 #include "virtmic/pcm.hpp"
+#include "virtmic/protocol.hpp"
 #include "virtmic/shm_layout.hpp"
 
 namespace {
@@ -152,5 +155,78 @@ TEST(EngineLoop, StartPassthroughTimeoutSilenceThenRetryRestore) {
     EXPECT_TRUE(LatestFrameIsNonSilent(m.view));
   }
 
+  engine->stop();
+}
+
+namespace {
+
+bool SendCommandViaPipe(const std::vector<uint8_t>& bytes) {
+  HANDLE pipe = INVALID_HANDLE_VALUE;
+  for (int i = 0; i < 50; ++i) {
+    pipe = CreateFileW(virtmic::kControlPipeName, GENERIC_READ | GENERIC_WRITE,
+                       0, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (pipe != INVALID_HANDLE_VALUE) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (pipe == INVALID_HANDLE_VALUE) return false;
+
+  DWORD mode = PIPE_READMODE_BYTE;
+  SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr);
+
+  const auto* p = bytes.data();
+  DWORD sent = 0;
+  while (sent < bytes.size()) {
+    DWORD n = 0;
+    if (!WriteFile(pipe, p + sent, static_cast<DWORD>(bytes.size() - sent), &n,
+                   nullptr)) {
+      CloseHandle(pipe);
+      return false;
+    }
+    if (n == 0) {
+      CloseHandle(pipe);
+      return false;
+    }
+    sent += n;
+  }
+
+  // Best-effort optional reply (ACK or nothing); must not consume engine events.
+  COMMTIMEOUTS to{};
+  to.ReadTotalTimeoutConstant = 100;
+  SetCommTimeouts(pipe, &to);
+  uint8_t reply[64];
+  DWORD got = 0;
+  ReadFile(pipe, reply, sizeof(reply), &got, nullptr);
+  CloseHandle(pipe);
+  return true;
+}
+
+}  // namespace
+
+// ControlServer must not steal InferTimeout from the CLI poll_event consumer.
+TEST(ControlServer, TimeoutLeavesInferTimeoutForCliPoll) {
+  SineSource source;
+  auto engine = virtmic::Engine::create(source);
+  ASSERT_NE(engine, nullptr);
+  engine->start();
+
+  virtmic::ControlServer server(*engine);
+  ASSERT_TRUE(server.start());
+
+  const auto bytes =
+      virtmic::encode_command(virtmic::Command::SimulateInferTimeout);
+  ASSERT_TRUE(SendCommandViaPipe(bytes));
+
+  std::optional<virtmic::EventType> ev;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+  while (std::chrono::steady_clock::now() < deadline) {
+    ev = engine->poll_event();
+    if (ev.has_value()) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_TRUE(ev.has_value());
+  EXPECT_EQ(*ev, virtmic::EventType::InferTimeout);
+
+  server.stop();
   engine->stop();
 }
