@@ -15,6 +15,7 @@ enum class Command : uint32_t {
   SetBypass = 3,
   SimulateInferTimeout = 4,
   Retry = 5,
+  SetPitchSemitones = 6,
 };
 
 enum class EventType : uint32_t {
@@ -35,11 +36,16 @@ struct BypassPayload {
   uint32_t enabled;
 };
 
+struct PitchPayload {
+  int32_t semitones;
+};
+
 struct EmptyPayload {};
 
 struct DecodedCommand {
   Command cmd;
   BypassPayload bypass{};
+  PitchPayload pitch{};
 };
 
 struct DecodedEvent {
@@ -54,11 +60,25 @@ inline void append_u32(std::vector<uint8_t>& out, uint32_t v) {
   std::memcpy(out.data() + off, &v, sizeof(uint32_t));
 }
 
+inline void append_i32(std::vector<uint8_t>& out, int32_t v) {
+  const std::size_t off = out.size();
+  out.resize(off + sizeof(int32_t));
+  std::memcpy(out.data() + off, &v, sizeof(int32_t));
+}
+
 inline bool read_u32(const uint8_t* data, std::size_t nbytes, std::size_t& off,
                      uint32_t& out) {
   if (off + sizeof(uint32_t) > nbytes) return false;
   std::memcpy(&out, data + off, sizeof(uint32_t));
   off += sizeof(uint32_t);
+  return true;
+}
+
+inline bool read_i32(const uint8_t* data, std::size_t nbytes, std::size_t& off,
+                     int32_t& out) {
+  if (off + sizeof(int32_t) > nbytes) return false;
+  std::memcpy(&out, data + off, sizeof(int32_t));
+  off += sizeof(int32_t);
   return true;
 }
 
@@ -95,6 +115,13 @@ inline std::vector<uint8_t> encode_command(Command cmd, BypassPayload payload) {
   return out;
 }
 
+inline std::vector<uint8_t> encode_command(Command cmd, PitchPayload payload) {
+  auto out = detail::encode_header(static_cast<uint32_t>(cmd),
+                                   sizeof(int32_t));
+  detail::append_i32(out, payload.semitones);
+  return out;
+}
+
 inline std::optional<DecodedCommand> decode_command(
     const std::vector<uint8_t>& bytes) {
   MessageHeader hdr{};
@@ -102,7 +129,7 @@ inline std::optional<DecodedCommand> decode_command(
   if (!detail::parse_header(bytes, hdr, off)) return std::nullopt;
 
   const auto cmd = static_cast<Command>(hdr.type);
-  DecodedCommand decoded{cmd, {}};
+  DecodedCommand decoded{cmd, {}, {}};
 
   if (cmd == Command::SetBypass) {
     if (hdr.nbytes != sizeof(uint32_t)) return std::nullopt;
@@ -111,6 +138,13 @@ inline std::optional<DecodedCommand> decode_command(
       return std::nullopt;
     }
     decoded.bypass.enabled = enabled;
+  } else if (cmd == Command::SetPitchSemitones) {
+    if (hdr.nbytes != sizeof(int32_t)) return std::nullopt;
+    int32_t semitones = 0;
+    if (!detail::read_i32(bytes.data(), bytes.size(), off, semitones)) {
+      return std::nullopt;
+    }
+    decoded.pitch.semitones = semitones;
   } else if (hdr.nbytes != 0) {
     // Start / Stop / SimulateInferTimeout / Retry expect no payload.
     return std::nullopt;

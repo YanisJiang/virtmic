@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstring>
 #include <vector>
 #include "virtmic/protocol.hpp"
 
@@ -29,4 +30,26 @@ TEST(Protocol, OversizedSetBypassPayloadRejected) {
   virtmic::detail::append_u32(bytes, 0xDEADBEEF);
   auto decoded = virtmic::decode_command(bytes);
   EXPECT_FALSE(decoded.has_value());
+}
+
+TEST(Protocol, SetPitchSemitonesRoundTrip) {
+  virtmic::PitchPayload p{-4};
+  auto bytes = virtmic::encode_command(virtmic::Command::SetPitchSemitones, p);
+  auto decoded = virtmic::decode_command(bytes);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->cmd, virtmic::Command::SetPitchSemitones);
+  EXPECT_EQ(decoded->pitch.semitones, -4);
+}
+
+TEST(Protocol, SetPitchRejectsBadPayloadSize) {
+  std::vector<uint8_t> bad;
+  auto append = [&](uint32_t v) {
+    const auto off = bad.size();
+    bad.resize(off + 4);
+    std::memcpy(bad.data() + off, &v, 4);
+  };
+  append(virtmic::kProtocolMagic);
+  append(static_cast<uint32_t>(virtmic::Command::SetPitchSemitones));
+  append(0);
+  EXPECT_FALSE(virtmic::decode_command(bad).has_value());
 }
